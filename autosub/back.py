@@ -79,6 +79,7 @@ class SpeechRecognizer(object):
 
                 try:
                     resp = requests.post(url, data=data, headers=headers)
+                    print("url:",url)
                 except requests.exceptions.ConnectionError:
                     continue
 
@@ -192,6 +193,50 @@ def find_speech_regions(filename, frame_width=4096, min_region_size=0.5, max_reg
     return regions
 
 
+def start(args):
+    print(args)
+    if args.format not in FORMATTERS.keys():
+        print(
+            "Subtitle format not supported. "
+            "Run with --list-formats to see all supported formats."
+        )
+        return 1
+
+    if args.src_language not in LANGUAGE_CODES.keys():
+        print(
+            "Source language not supported. "
+            "Run with --list-languages to see all supported languages."
+        )
+        return 1
+
+    if args.dst_language not in LANGUAGE_CODES.keys():
+        print(
+            "Destination language not supported. "
+            "Run with --list-languages to see all supported languages."
+        )
+        return 1
+
+    if not args.source_path:
+        print("Error: You need to specify a source path.")
+        return 1
+
+    try:
+        subtitle_file_path = generate_subtitles(
+            source_path=args.source_path,
+            concurrency=args.concurrency,
+            src_language=args.src_language,
+            dst_language=args.dst_language,
+            api_key=args.api_key,
+            subtitle_file_format=args.format,
+            output=args.output,
+        )
+        print("Subtitles file created at {}".format(subtitle_file_path))
+    except KeyboardInterrupt:
+        return 1
+
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('source_path', help="Path to the video or audio file to subtitle", nargs='?')
@@ -266,7 +311,6 @@ def main():
 
     return 0
 
-
 def generate_subtitles(
     source_path,
     output=None,
@@ -280,6 +324,7 @@ def generate_subtitles(
 
     regions = find_speech_regions(audio_filename)
 
+    multiprocessing.freeze_support()
     pool = multiprocessing.Pool(concurrency)
     converter = FLACConverter(source_path=audio_filename)
     recognizer = SpeechRecognizer(language=src_language, rate=audio_rate,

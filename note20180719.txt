@@ -1,0 +1,392 @@
+------------------------------------------------------------------------------------------------------------------------
+实用注意事项：
+1、确保命令行下能够使用ffmpeg：
+	window 7 下，将ffmpeg所在文件夹路径添加到环境变量中(ExSubtitle\ffmpeg\bin 下的ffmpeg.exe)
+2、视频文件及文件夹不包含在中文：
+
+3、确保系统能够访问Google：
+	Shadowsock 启动系统代理，使用配置代理端口： 127.0.0.1:1080
+
+4、确保360等软件不会限制此软件的权限：
+
+
+PS：
+	只能抽取英文字幕 20180719
+--------------------------------------------------------------------------------------------------------------------
+问题 一：Windows 系统 文件路径判断及可执行与否判断问题？：
+
+	os.path.isfile(r"C:\ProgramData\ffmpeg-4.0.1-win64-static\bin\ffmpeg.exe")
+	True
+	os.path.isfile("C:\ProgramData\ffmpeg-4.0.1-win64-static\bin\ffmpeg.exe")
+	False
+
+	https://www.douban.com/note/610935909/
+		Windows路径的“正统”写法应该是：
+
+		path = os.path.normcase("c:/mydir/mysubdir/")
+
+		os.path.normcase在Windows平台下会自动把正斜杠转换成反斜杠。
+
+	# 修改后判断是否存在文件及可执行与否
+	def which(program):
+	    def is_exe(file_path):
+	        return os.path.isfile(file_path) and os.access(file_path, os.X_OK)
+
+	    fpath, fname = os.path.split(program)
+	    if fpath:
+	        if is_exe(program):
+	            return program
+	    else:
+	        for path in os.environ["PATH"].split(os.pathsep):
+	            path = path.strip('"')
+	            exe_file = os.path.join(path, program)
+	            if is_exe(exe_file):
+	                return exe_file
+	            # compatable with backflash of  windows directory
+	            exe_file = os.path.join(os.path.normcase(path), (program + '.exe'))
+	            if is_exe(exe_file):
+	                return exe_file
+	    return None
+
+问题 二：Error Permission denied Files Flac
+		https://github.com/agermanidis/autosub/issues/31
+		https://github.com/agermanidis/autosub/issues/15
+		temp = tempfile.NamedTemporaryFile(suffix='.flac')  ---->  temp = tempfile.NamedTemporaryFile(suffix='.flac', delete=False)
+
+问题 三：多进程导致tkinter 会弹出多个窗口问题
+    https://blog.csdn.net/qq_34896470/article/details/78782736
+
+问题 四：打包应用：
+    pywin32
+    pyinstaller
+    # 这个命令
+    pyinstaller -w -i C:\Users\niuxingjie\Downloads\prog_python_128px_1097222_easyicon.net.ico front.py
+------------------------------------------------------------------------------------------------------------------------
+from __future__ import absolute_import , print_function, unicode_literals
+import argparse
+import audioop
+from googleapiclient.discovery import build
+import json
+import math
+import multiprogressing
+import os
+import requests
+import subprogress
+import sys
+import tempfile
+import wave
+
+from progressbar import ProgressBar, Percentage, Bar, ETA
+
+from autosub.constants import (
+	LANGUAGE_CODES, GOOGLE_SPEECH_API_KEY, GOOGLE_SPEECH_API_URL,
+) # 
+from autosub.formatters import FORMATTERS  # 
+"""
+	FORMATTERS = {
+	    'srt': srt_formatter,
+	    'vtt': vtt_formatter,
+	    'json': json_formatter,
+	    'raw': raw_formatter,				
+	}
+"""
+
+DEFAULT_SUBTITLE_FORMAT = 'srt'
+DEFAULT_CONCURRENCY = 10
+DEFAULT_SRC_LANGUAGE = 'en'
+DEFAULT_DST_LANGUAGE = 'en'
+
+
+def main():
+
+	# 解析命令行参数
+	parser = argparse.ArgumentParser()
+
+	parser.add_argument('source_path', help="Path to the video or audio file to subtitle", nargs='?') # 视频源文件
+	parser.add_argument('-C', '--concurrency', help="Number of concurrent API requests to make", type=int, default=DEFAULT_CONCURRENCY) # 并发的请求 google api数量
+	parser.add_argument('-o', '--output',
+                        help="Output path for subtitles (by default, subtitles are saved in \
+                        the same directory and name as the source path)") # 输出文件，默认同一目录下名字相同，后缀不同
+    parser.add_argument('-F', '--format', help="Destination subtitle format",
+                        default=DEFAULT_SUBTITLE_FORMAT) # 字幕文件格式
+    parser.add_argument('-S', '--src-language', help="Language spoken in source file",
+                        default=DEFAULT_SRC_LANGUAGE) # 视频源文件语言
+    parser.add_argument('-D', '--dst-language', help="Desired language for the subtitles",
+                        default=DEFAULT_DST_LANGUAGE) # 期望转换成的语言
+    parser.add_argument('-K', '--api-key',
+                        help="The Google Translate API key to be used. (Required for subtitle translation)") # 翻译api_key
+    parser.add_argument('--list-formats', help="List all available subtitle formats", action='store_true') # 可用的字幕格式
+    parser.add_argument('--list-languages', help="List all available source/destination languages", action='store_true') # 可用的语言
+
+
+    args = parser.parse_args()
+
+
+    # 参数预处理
+    if args.list_formats: 
+    	print("List of formats:")
+    	for subtitle_format in FORMATTERS.keys():
+    		print("{format}".format(format=subtitle_format))
+    	return 0 
+
+    if args.list_languages:
+        print("List of all languages:")
+        for code, language in sorted(LANGUAGE_CODES.items()):
+            print("{code}\t{language}".format(code=code, language=language))
+        return 0
+
+    if args.format not in FORMATTERS.keys():
+        print(
+            "Subtitle format not supported. "
+            "Run with --list-formats to see all supported formats."
+        )
+        return 1
+
+    if args.src_language not in LANGUAGE_CODES.keys():
+        print(
+            "Source language not supported. "
+            "Run with --list-languages to see all supported languages."
+        )
+        return 1
+
+    if args.dst_language not in LANGUAGE_CODES.keys():
+        print(
+            "Destination language not supported. "
+            "Run with --list-languages to see all supported languages."
+        )
+        return 1
+
+    if not args.source_path:
+        print("Error: You need to specify a source path.")
+        return 1
+
+
+
+    # 执行生成字幕
+    try:
+    	subtitle_file_path = generate_subtitles(
+    		source_path = args.source,
+    		concurrency=args.concurrency,
+            src_language=args.src_language,
+            dst_language=args.dst_language,
+            api_key=args.api_key,
+            subtitle_file_format=args.format,
+            output=args.output,
+    	)
+    	print("Subtitles file created at {}".format(subtitle_file_path))
+    except KeyboardInterrupt:
+    	reuturn 1
+
+    return 0
+
+
+
+# 生成字幕函数
+def generate_subtitles(
+    source_path,
+    output=None,
+    concurrency=DEFAULT_CONCURRENCY,
+    src_language=DEFAULT_SRC_LANGUAGE,
+    dst_language=DEFAULT_DST_LANGUAGE,
+    subtitle_file_format=DEFAULT_SUBTITLE_FORMAT,
+    api_key=None,
+):
+	audio_filename, audio_rate = extract_audio(source_path)
+
+	# 音频分段时间间隔
+	regions = find_speech_regions(audio_filename)
+	
+	# 多进程
+	pool = multiprocessing.Pool(concurrency)
+	# 	
+	converter = FLACConverter(source_path=audio_filename)
+	# 
+    recognizer = SpeechRecognizer(language=src_language, rate=audio_rate,
+                                  api_key=GOOGLE_SPEECH_API_KEY)
+
+    transcripts = []
+    if regions:
+    	try:
+    		widgets = ["Converting speech regions to FLAC files: ", Percentage(), ' ', Bar(), ' ',
+                       ETA()]
+            pbar = ProgressBar(widgets=widgets, maxval=len(regions)).start()
+
+            # 分片
+            extracted_regions = []
+            for i, extracted_region in enumerate(pool.imap(converter, regions)):
+                extracted_regions.append(extracted_region)
+                pbar.update(i)
+            pbar.finish()
+
+
+            # 提取字幕
+            widgets = ["Performing speech recognition: ", Percentage(), ' ', Bar(), ' ', ETA()]
+            pbar = ProgressBar(widgets=widgets, maxval=len(regions)).start()
+
+            for i, transcript in enumerate(pool.imap(recognizer, extracted_regions)):
+                transcripts.append(transcript)
+                pbar.update(i)
+            pbar.finish()
+
+            # 判断是否需要翻译
+            if not is_same_language(src_language, dst_language):
+                if api_key:
+                    google_translate_api_key = api_key
+                    translator = Translator(dst_language, google_translate_api_key,
+                                            dst=dst_language,
+                                            src=src_language)
+                    prompt = "Translating from {0} to {1}: ".format(src_language, dst_language)
+                    widgets = [prompt, Percentage(), ' ', Bar(), ' ', ETA()]
+                    pbar = ProgressBar(widgets=widgets, maxval=len(regions)).start()
+                    translated_transcripts = []
+                    for i, transcript in enumerate(pool.imap(translator, transcripts)):
+                        translated_transcripts.append(transcript)
+                        pbar.update(i)
+                    pbar.finish()
+                    transcripts = translated_transcripts
+                else:
+                    print(
+                        "Error: Subtitle translation requires specified Google Translate API key. "
+                        "See --help for further information."
+                    )
+                    return 1
+
+
+        except KeyboardInterrupt:
+            pbar.finish()
+            pool.terminate()
+            pool.join()
+            print("Cancelling transcription")
+            raise
+
+        timed_subtitles = [(r, t) for r, t in zip(regions, transcripts) if t]
+	    formatter = FORMATTERS.get(subtitle_file_format)
+	    formatted_subtitles = formatter(timed_subtitles)
+
+	    dest = output
+
+	    if not dest:
+	        base, ext = os.path.splitext(source_path)
+	        dest = "{base}.{format}".format(base=base, format=subtitle_file_format)
+
+	    with open(dest, 'wb') as f:
+	        f.write(formatted_subtitles.encode("utf-8"))
+
+	    os.remove(audio_filename)
+
+	    return dest
+
+
+
+# 抽取音频文件
+def extract_audio(filename, channels=1, rate=1600):
+	temp = tempfile.NameTemporaryFile(suffix='.wav', delete=False)
+
+	# 源文件是否存在
+	if not os.path.isfile(filename):
+		print("The given file does not exist: {0}".format(filename))
+		raise Exception("Invalid filepath: {0}".format(filename))
+
+	# ffmpeg 是否可以使用
+	if not which("ffmpeg"):
+		print("ffmpeg: Executable not found on machine.")
+        raise Exception("Dependency not found: ffmpeg")
+
+    # 获取
+    command = ["ffmpeg", "-y", "-i", filename, "-ac", str(channels), "-ar", str(rate), "-loglevel", "error", temp.name]
+	
+	# ？？？ windows下 os.name == "nt"
+	use_shell = True if os.name == "nt" else False
+
+	# 
+	subprocess.check_output(command, stdin=open(os.devnull), shell=use_shell)
+	return temp.name, rate
+
+
+# 音频 切片
+class FLACConverter(object):
+	def __init__(self, source_path, include_before=0.25, include_after=0.25):
+		self.source_path = source_path
+		self.include_before = include_before
+		self.include_after = include_after
+
+	def __call__(self, region):
+		try:
+			start, end = region
+			start = max(0, start - self.include_before)
+			end += self.include_after
+			temp = tempfile.NamedTemporaryFile(suffix='.flac')
+			command = ["ffmpeg","-ss", str(start), "-t", str(end - start),
+                       "-y", "-i", self.source_path,
+                       "-loglevel", "error", temp.name]
+            use_shell = True if os.name == "nt" else False
+            subprocess.check_output(command, stdin=open(os.devnull), shell=use_shell)
+            return temp.read() 
+
+        except KeyboardInterrupt:
+            return
+
+
+# 
+class SpeechRecognizer(object):
+	def __init__(self, language="en", rate=44100, retries=3, api_key=GOOGLE_SPEECH_API_KEY):
+        self.language = language
+        self.rate = rate
+        self.api_key = api_key
+        self.retries = retries
+
+    def __call__(self, data):
+    	try:
+    		for i in range(self.retries):
+    			url = GOOGLE_SPEECH_API_URL.format(lang=self.language, key=self.api_key)
+    			headers = {"Content-Type": "audio/x-flac; rate=%d" % self.rate}
+
+
+    			try:
+    				resp = requests.post(url, data=data, headers=headers)
+    			except requests.exceptions.ConnectionError:
+    				continue
+
+    			for line in resp.content.decode().split("\n"):
+    				try:
+    					line = json.loads(line)
+    					line = line['result'][0]['alternative'][0]['transcript']
+    					return line[:1].upper() + line[1:]
+    				except:
+    					continue
+
+        except KeyboardInterrupt:
+            return
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+	main()
+
+--------------------------------------------------------------------------------------------------------------------
+ffmpeg -h： http://mikewootc.com/wiki/sw_develop/multimedia/ffmpeg_app_param.html
+
+-y                  overwrite output files
+-ac channels        set number of audio channels
+-ar rate            set audio sampling rate (in Hz)
+-loglevel loglevel  set logging level
+-i                  source filename
+
+-ss position        搜索到指定的起始时间 [-]hh:mm:ss[.xxx]的格式也支持
+-t duration         设置录制/转码的时长. hh:mm:ss[.xxx]格式的记录时间也支持
+
+
+--------------------------------------------------------------------------------------------------------------------
+subprocess.check_output()
+	父进程等待子进程完成
+	返回子进程向标准输出的输出结果
+	检查退出信息，如果returncode不为0，则举出错误subprocess.CalledProcessError，该对象包含有returncode属性和output属性，output属性为标准输出的输出结果，可用try…except…来检查。
+
+
+
+
