@@ -14,3 +14,6 @@ Ideas_Come_From_Everywhere.mp4
 build/
 dist/
 *.spec
+
+# 临时文件
+temp/

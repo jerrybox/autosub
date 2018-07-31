@@ -9,7 +9,6 @@
 
 4、确保360等软件不会限制此软件的权限：
 
-
 PS：
 	只能抽取英文字幕 20180719
 --------------------------------------------------------------------------------------------------------------------
@@ -55,12 +54,15 @@ PS：
 
 问题 三：多进程导致tkinter 会弹出多个窗口问题
     https://blog.csdn.net/qq_34896470/article/details/78782736
+    实用multiprocessing之前，添加这行代码：multiprocessing.freeze_support()
 
 问题 四：打包应用：
     pywin32
     pyinstaller
     # 这个命令
     pyinstaller -w -i C:\Users\niuxingjie\Downloads\prog_python_128px_1097222_easyicon.net.ico front.py
+
+
 ------------------------------------------------------------------------------------------------------------------------
 from __future__ import absolute_import , print_function, unicode_literals
 import argparse
