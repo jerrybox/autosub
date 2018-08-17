@@ -194,7 +194,6 @@ def find_speech_regions(filename, frame_width=4096, min_region_size=0.5, max_reg
 
 
 def start(args):
-    print(args)
     if args.format not in FORMATTERS.keys():
         print(
             "Subtitle format not supported. "
