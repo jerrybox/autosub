@@ -6,6 +6,7 @@ import os
 import multiprocessing
 from tkinter import ttk
 import sys
+import requests
 
 from autosub.constants import LANGUAGE_CODES
 from autosub.back import start
@@ -57,7 +58,13 @@ class Start(object):
     def get_file(self):
         self.log_out.delete("1.0", END)
         self.filename = os.path.normcase(tkFileDialog.askopenfilename())
-        print("选择文件：",self.filename)
+        print("选择文件：\n",self.filename)
+        try:
+            response = requests.get('http://www.google.com')
+            if not (response.status_code == 200):
+                print("网络问题：连接Google失败.")
+        except Exception as e:
+            print("网络问题：\n%s" % e)
 
 
 def main():
@@ -80,7 +87,7 @@ def main():
     labels = LabelFrame(window, text=" 温馨提示： ",width=300,height=50)
     label_zero = Label(labels, text=u'请确保能够使用ffmpeg！', font=('Arial', 12), width=50, height=2)
     label_one = Label(labels, text=u'请确保能够访问Google！', font=('Arial', 12), width=50, height=2)
-    label_two = Label(labels, text=u'请确保文件及文件夹不包含中文！', font=('Arial', 12), width=50, height=2)
+    label_two = Label(labels, text=u'请确保文件及文件夹名称不包含中文！', font=('Arial', 12), width=50, height=2)
 
     # 添加组件
     labels.grid(column=0, row=0, padx=10, pady=10)
